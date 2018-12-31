@@ -17,7 +17,7 @@ class Accelerometer extends Component {
         }
     }
 
-    componentWillMount() {
+    componentDidMount() {
         window.ondevicemotion = this.onDeviceMotion
     }
 
@@ -25,7 +25,7 @@ class Accelerometer extends Component {
         this.setState({
             dme: event
         });
-        this.props.setAccelerometerValues(event);
+        this.props.updateAccelerometerValues(event);
     }
 
     render() {

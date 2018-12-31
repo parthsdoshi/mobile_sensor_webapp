@@ -1,6 +1,7 @@
 import React, { Component } from 'react';
 import Accelerometer from './Accelerometer';
 import GPS from './GPS';
+import Audio from './Audio';
 
 import 'bulma/css/bulma.css';
 import '@fortawesome/fontawesome-free/css/all.css';
@@ -16,78 +17,74 @@ class App extends Component {
     this.state = {
       mic: null,
       recording: false,
-      last_recorded: null,
-      last_recorded_url: null,
-      longitude: null,
-      latitude: null,
+      recordedAudio: null,
+      recordedAudioURL: null,
       error: false
     };
-    this.recorded_audio_blobs = [];
+    this.recordedAudioBlobs = [];
     this.fr = new FileReader();
     this.counter = 0;
     this.fftOutput = [];
     this.recordedOutput = []
+    this.blobLengthMS = 0.;
   }
 
-  setAccelerometerValues = (deviceMotionEvent) => {
+  componentDidMount() {
+
+  }
+
+  updateAccelerometerValues = (deviceMotionEvent) => {
     this.accelerometerValues = deviceMotionEvent;
   }
 
-  setPosition = (position) => {
+  updatePosition = (position) => {
     this.position = position;
   }
 
-  process_audio = (e) => {
-    // console.log(e);
-
-    // should equal length (audioBuffer.length) / (analyser.fftSize)) truncated
-    this.counter++;
-    // console.log(this.counter);
-
-    let bufferLength = this.analyser.frequencyBinCount;
-    let dataArray = new Uint8Array(bufferLength);
-    this.analyser.getByteFrequencyData(dataArray);
-    // console.log(dataArray);
-    this.fftOutput.push(dataArray);
-    this.recordedOutput.push({
-      fft: dataArray,
-      accelerometer: {
-        x: this.state.dme.acceleration.x,
-        y: this.state.dme.acceleration.y,
-        z: this.state.dme.acceleration.z
-      },
-      coords: {
-        latitude: this.state.latitude,
-        longitude: this.state.longitude
+  pushNewAudioBlob = (blob, event) => {
+    if (this.state.recording) {
+      if (event.currentTarget.state === "inactive") {
+        console.log(blob);
       }
-    });
+      this.recordedAudioBlobs.push(blob);
+      this.recordedOutput.push([Date.now(), this.accelerometerValues, this.position]);
+    }
   }
 
-  createCsv = () => {
-    let csvContent = "data:text/csv;charset=utf-8,";
-    this.recordedOutput.forEach((o) => {
-      let rowArr = [];
-      rowArr = rowArr.concat(o.fft);
-      rowArr.push(o.accelerometer.x);
-      rowArr.push(o.accelerometer.y);
-      rowArr.push(o.accelerometer.z);
-      rowArr.push(o.coords.latitude);
-      rowArr.push(o.coords.longitude);
-      csvContent += rowArr.join(',') + '\r\n';
-    });
-    this.setState({
-      csv: window.encodeURI(csvContent)
-    });
+  newMediaRecorder = (mediaRecorder) => {
+    this.mediaRecorder = mediaRecorder;
   }
 
-  save_recording = () => {
-    let lr = new Blob(this.recorded_audio_blobs);
-    let lru = window.URL.createObjectURL(lr);
+
+  toggleRecording = () => {
+    if (this.state.recording) {
+      this.mediaRecorder.stop();
+      this.setState({
+        recording: false
+      });
+      this.saveRecording();
+    } else {
+      this.recordedAudioBlobs = []
+      this.recordedOutput = []
+      this.mediaRecorder.start(this.blobLengthMS);
+      this.setState({
+        recording: true
+      });
+    }
+  }
+
+  saveRecording = () => {
+    let lr = new Blob(this.recordedAudioBlobs);
     this.setState({
-      last_recorded: lr,
-      last_recorded_url: lru
+      recordedAudio: lr
     });
 
+    this.mediaRecorder.removeEventListener('stop', this.saveRecording);
+
+    this.processRecording(lr);
+  }
+
+  processRecording = (recordedAudio) => {
     // used to read in audio as pure bytes
     this.fr.onloadend = () => {
       // need default audioctx for decodeAudioData method
@@ -102,7 +99,9 @@ class App extends Component {
           offlineAudioCtx = new window.webkitOfflineAudioContext(audioBuffer.numberOfChannels, audioBuffer.length, audioBuffer.sampleRate)
         } else {
           this.setState({
-            error: true
+            error: true,
+            errorCode: 2,
+            errorMessage: "Offline Audio Context not supported by this device."
           });
         }
         let source = offlineAudioCtx.createBufferSource();
@@ -112,7 +111,7 @@ class App extends Component {
         // should give us an fft output around every .003 seconds
         // (1 / (192000/512))
         let fftSize = 2048.;
-        window.alert(audioBuffer.sampleRate);
+        // window.alert(audioBuffer.sampleRate);
         while ((1. / (audioBuffer.sampleRate / fftSize)) >= 0.003) {
           if (fftSize === 512.) {
             break;
@@ -131,77 +130,48 @@ class App extends Component {
         processor.connect(offlineAudioCtx.destination);
 
         // every call means fftSize amount of values have been played and ready to be evaluated by fft
-        processor.onaudioprocess = this.process_audio;
+        processor.onaudioprocess = this.processSample;
 
         // start processing the audio
         source.start();
         offlineAudioCtx.oncomplete = (renderedBuffer) => {
           console.log(this.counter);
           console.log(this.recordedOutput);
+          console.log(this.fftOutput);
+          console.log(this.recordedAudioBlobs);
+          console.log(this.state.recordedAudio);
           this.createCsv();
         }
         offlineAudioCtx.startRendering();
       });
     }
     // calls the above callback once it's done reading in
-    this.fr.readAsArrayBuffer(lr);
+    this.fr.readAsArrayBuffer(recordedAudio);
   }
 
-  audio_stream = (stream) => {
-    // requires https to work on chrome and safari
-    // this.player.srcObject = stream;
-    this.options = {
-      // chrome likes webm
-      mimeType: 'audio/webm',
-    };
-    if (MediaRecorder.isTypeSupported(this.options.mimeType)) {
-      this.mediaRecorder = new MediaRecorder(stream, this.options);
-    } else {
-      // firefox only supports ogg completely
-      this.options.mimeType = 'audio/ogg'
-      if (MediaRecorder.isTypeSupported(this.options.mimeType)) {
-        this.mediaRecorder = new MediaRecorder(stream, this.options);
-      } else {
-        // safari polyfill
-        this.options.mimeType = 'audio/wav'
-        if (MediaRecorder.isTypeSupported(this.options.mimeType)) {
-          this.mediaRecorder = new MediaRecorder(stream, this.options);
-        } else {
-          console.log("Recording audio is not supported on this device.")
-          return;
-        }
-      }
-    }
+  processSample = (e) => {
+    // console.log(e);
 
-    this.mediaRecorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) {
-        this.recorded_audio_blobs.push(event.data);
-      } else {
-        console.log("error in recording maybe");
-        console.log(event);
-      }
-    });
-    this.mediaRecorder.addEventListener('stop', this.save_recording);
+    // should equal length (audioBuffer.length) / (analyser.fftSize)) truncated
+    this.counter++;
+    // console.log(this.counter);
+
+    let bufferLength = this.analyser.frequencyBinCount;
+    let dataArray = new Uint8Array(bufferLength);
+    this.analyser.getByteFrequencyData(dataArray);
+    // console.log(dataArray);
+    this.fftOutput.push(dataArray);
   }
 
-  componentDidMount() {
-    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      .then(this.audio_stream);
-  }
-
-  toggle_recording = () => {
-    if (this.state.recording) {
-      this.mediaRecorder.stop();
-      this.setState({
-        recording: false
-      });
-    } else {
-      this.recorded_audio_blobs = []
-      this.mediaRecorder.start(3);
-      this.setState({
-        recording: true
-      });
-    }
+  createCsv = () => {
+    // let csvContent = "data:text/csv;charset=utf-8,";
+    // this.recordedOutput.forEach((o) => {
+    //   let rowArr = [];
+    //   csvContent += rowArr.join(',') + '\r\n';
+    // });
+    // this.setState({
+    //   csv: window.encodeURI(csvContent)
+    // });
   }
 
   render() {
@@ -210,41 +180,27 @@ class App extends Component {
         {this.state.error && <h1 className="is-1 has-text-danger">ERROR</h1>}
 
         <div className="box">
-          <Accelerometer setAccelerometerValues={this.setAccelerometerValues} />
+          <Accelerometer updateAccelerometerValues={this.updateAccelerometerValues} />
+          {/*<a className="button is-danger" onClick={this.toggleRecordingAccelerometer} href='#'>Record Accelerometer</a>*/}
         </div>
 
         <div className="box">
-          <GPS setPosition={this.setPosition} enableHighAccuracy={true} maximumAge={0} timeout={1} />
+          <GPS updatePosition={this.updatePosition} enableHighAccuracy={true} maximumAge={0} timeout={1} />
+          {/*<a className="button is-danger" onClick={this.toggleRecordingGPS} href='#'>Record GPS Coordinates</a>*/}
+        </div>
+
+        <div className="box">
+          {/* <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} /> */}
+          <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} newMediaRecorder={this.newMediaRecorder} />
+          {/*<a className="button is-danger" onClick={this.toggleRecordingAudio} href='#'>Record Audio</a>*/}
         </div>
 
         <div className="box">
           <h3 className="title is-3">Record All Sensors</h3>
-          <a className="button is-danger" onClick={this.toggle_recording} href='#'>{(!this.state.recording && 'Start') || (this.state.recording && 'Stop')} Recording</a>
+          <a className="button is-danger" onClick={this.toggleRecording}>{(!this.state.recording && 'Start') || (this.state.recording && 'Stop')} Recording</a>
           {/*this.mediaRecorder && this.mediaRecorder.mimeType*/}
-          {/*this.state.last_recorded_url*/}
-          {this.state.last_recorded != null && <div>
-            <div className='box'>
-              <h4 className="title is-4">Audio Data</h4>
-              {this.options.mimeType !== 'audio/webm' &&
-                <div className='box'>
-                  {/*<audio id="player" controls src={this.state.last_recorded_url}></audio>*/}
-                  <audio id="player" controls key={this.state.last_recorded_url}>
-                    <source key={this.state.last_recorded_url} type={this.options.mimeType} src={this.state.last_recorded_url}></source>
-                  </audio>
-                </div>
-              }
-              {this.options.mimeType === 'audio/webm' &&
-                <div className='box'>
-                  {/*<video id="player" controls src={this.state.last_recorded_url}></video>*/}
-                  <video id="player" controls key={this.state.last_recorded_url}>
-                    <source key={this.state.last_recorded_url} type={this.options.mimeType} src={this.state.last_recorded_url}></source>
-                  </video>
-                </div>
-              }
-              {this.state.last_recorded != null &&
-                <a className="button is-info" href={this.state.last_recorded_url} download={'audio.' + this.options.mimeType.split('/')[1]}>Download Last Audio Recording</a>
-              }
-            </div>
+          {/*this.state.recordedAudioURL*/}
+          {this.state.recordedAudio != null && <div>
             <a className="button is-info" href={this.state.csv} download="results.csv">Download csv of all sensor data</a>
           </div>}
         </div>

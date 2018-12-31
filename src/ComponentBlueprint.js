@@ -9,7 +9,7 @@ class CB extends Component {
         }
     }
 
-    componentWillMount() {
+    componentDidMount() {
 
     }
 

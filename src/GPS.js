@@ -17,7 +17,7 @@ class GPS extends Component {
         }
     }
 
-    componentWillMount() {
+    componentDidMount() {
         if (navigator.geolocation != null) {
             navigator.geolocation.watchPosition(this.updatePosition, this.positionError, {
                 enableHighAccuracy: this.props.enableHighAccuracy,
@@ -31,7 +31,7 @@ class GPS extends Component {
         this.setState({
             position: position
         });
-        this.props.setPosition(position);
+        this.props.updatePosition(position);
     }
 
     positionError = (err) => {
@@ -55,7 +55,7 @@ class GPS extends Component {
                 </p>
                 {this.state.error &&
                     <h4 className="has-text-danger">
-                        Error Occurred: {'' + this.state.errorCode + ': ' + this.state.errorMessage}
+                        Error Occurred: {'Error Code ' + this.state.errorCode + ': ' + this.state.errorMessage}
                     </h4>
                 }
             </div>
