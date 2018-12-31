@@ -35,7 +35,6 @@ class GPS extends Component {
     }
 
     positionError = (err) => {
-        console.log(err);
         this.setState({
             error: true,
             errorCode: err.code,

@@ -26,7 +26,7 @@ class App extends Component {
     this.counter = 0;
     this.fftOutput = [];
     this.recordedOutput = []
-    this.blobLengthMS = 0.;
+    this.blobLengthMS = 1;
   }
 
   componentDidMount() {
@@ -43,9 +43,6 @@ class App extends Component {
 
   pushNewAudioBlob = (blob, event) => {
     if (this.state.recording) {
-      if (event.currentTarget.state === "inactive") {
-        console.log(blob);
-      }
       this.recordedAudioBlobs.push(blob);
       this.recordedOutput.push([Date.now(), this.accelerometerValues, this.position]);
     }
@@ -59,6 +56,7 @@ class App extends Component {
   toggleRecording = () => {
     if (this.state.recording) {
       this.mediaRecorder.stop();
+      while (this.mediaRecorder.state !== "inactive");
       this.setState({
         recording: false
       });
@@ -77,26 +75,35 @@ class App extends Component {
     let lr = new Blob(this.recordedAudioBlobs);
     this.setState({
       recordedAudio: lr
+    }, () => {
+      this.processRecording();
     });
-
-    this.mediaRecorder.removeEventListener('stop', this.saveRecording);
-
-    this.processRecording(lr);
   }
 
-  processRecording = (recordedAudio) => {
+  processRecording = () => {
+    let recordedAudio = this.state.recordedAudio;
+
     // used to read in audio as pure bytes
     this.fr.onloadend = () => {
+      console.log(this.fr.result);
       // need default audioctx for decodeAudioData method
       let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       audioCtx.decodeAudioData(this.fr.result, (audioBuffer) => {
         console.log(audioBuffer);
+        window.alert(audioBuffer.length);
+        return;
+        // if (audioBuffer.length === 0) {
+        //   this.saveRecording();
+        //   return;
+        // }
+        // window.alert(audioBuffer.duration);
 
         let offlineAudioCtx = null;
         if (window.OfflineAudioContext) {
-          offlineAudioCtx = new window.OfflineAudioContext(audioBuffer.numberOfChannels, audioBuffer.length, audioBuffer.sampleRate)
+          offlineAudioCtx = new window.OfflineAudioContext(audioBuffer.numberOfChannels, audioBuffer.length, audioBuffer.sampleRate);
         } else if (window.webkitOfflineAudioContext) {
-          offlineAudioCtx = new window.webkitOfflineAudioContext(audioBuffer.numberOfChannels, audioBuffer.length, audioBuffer.sampleRate)
+          // window.alert('' + audioBuffer.numberOfChannels + '\n' + audioBuffer.length + '\n' + audioBuffer.sampleRate)
+          offlineAudioCtx = new window.webkitOfflineAudioContext(audioBuffer.numberOfChannels, audioBuffer.length, audioBuffer.sampleRate);
         } else {
           this.setState({
             error: true,
@@ -143,6 +150,8 @@ class App extends Component {
           this.createCsv();
         }
         offlineAudioCtx.startRendering();
+      }, (e) => {
+        window.alert(e.message);
       });
     }
     // calls the above callback once it's done reading in
@@ -197,7 +206,7 @@ class App extends Component {
 
         <div className="box">
           <h3 className="title is-3">Record All Sensors</h3>
-          <a className="button is-danger" onClick={this.toggleRecording}>{(!this.state.recording && 'Start') || (this.state.recording && 'Stop')} Recording</a>
+          <button className="button is-danger" onClick={this.toggleRecording}>{(!this.state.recording && 'Start') || (this.state.recording && 'Stop')} Recording</button>
           {/*this.mediaRecorder && this.mediaRecorder.mimeType*/}
           {/*this.state.recordedAudioURL*/}
           {this.state.recordedAudio != null && <div>

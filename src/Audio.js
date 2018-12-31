@@ -88,6 +88,7 @@ class Audio extends Component {
                         {this.state.mimeType === 'audio/webm' &&
                             <div className='box'>
                                 {/*<video id="player" controls src={recordedAudioURL}></video>*/}
+                                {/* we need video because chrome is dumb */}
                                 <video id="player" controls key={recordedAudioURL}>
                                     <source key={recordedAudioURL} type={this.state.mimeType} src={recordedAudioURL}></source>
                                 </video>
