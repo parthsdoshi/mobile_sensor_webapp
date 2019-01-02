@@ -2,18 +2,15 @@ import React, { Component } from 'react';
 import Accelerometer from './Accelerometer';
 import GPS from './GPS';
 import Audio from './Audio';
+import Marking from './Marking';
 
 import 'bulma/css/bulma.css';
 import '@fortawesome/fontawesome-free/css/all.css';
 
-if (window.MediaRecorder == null) {
-  // safari polyfill
-  window.MediaRecorder = require('audio-recorder-polyfill');
-}
-
 class App extends Component {
   constructor(props) {
     super(props);
+
     this.state = {
       mic: null,
       recording: false,
@@ -21,12 +18,21 @@ class App extends Component {
       recordedAudioURL: null,
       error: false
     };
+
+    this.recordedAccelerometerValues = [];
+    this.recordedPositionValues = [];
+
+    this.recordedAudioStartTimestamp = null;
+    this.recordedAudioEndTimestamp = null;
     this.recordedAudioBlobs = [];
     this.fr = new FileReader();
+    this.fr.addEventListener('error', (e) => {
+      console.log(e);
+    });
     this.counter = 0;
     this.fftOutput = [];
-    this.recordedOutput = []
-    this.blobLengthMS = 1;
+    // this.recordedOutput = []
+    this.blobLengthMS = null;
   }
 
   componentDidMount() {
@@ -35,35 +41,69 @@ class App extends Component {
 
   updateAccelerometerValues = (deviceMotionEvent) => {
     this.accelerometerValues = deviceMotionEvent;
+
+    if (this.state.recording) {
+      this.recordedAccelerometerValues.push([
+        Date.now(),
+        deviceMotionEvent.acceleration.x,
+        deviceMotionEvent.acceleration.x,
+        deviceMotionEvent.acceleration.z
+      ]);
+    }
   }
 
   updatePosition = (position) => {
     this.position = position;
-  }
 
-  pushNewAudioBlob = (blob, event) => {
     if (this.state.recording) {
-      this.recordedAudioBlobs.push(blob);
-      this.recordedOutput.push([Date.now(), this.accelerometerValues, this.position]);
+      this.recordedPositionValues.push([
+        Date.now(),
+        position.coords.longitude,
+        position.coords.latitude
+      ]);
     }
   }
 
-  newMediaRecorder = (mediaRecorder) => {
+  newMediaRecorder = (mediaRecorder, mimeType) => {
     this.mediaRecorder = mediaRecorder;
+    this.mimeType = mimeType;
+    this.mediaRecorder.addEventListener('stop', this.saveRecording);
+    this.mediaRecorder.addEventListener('error', (e) => {
+      console.log('error in recording audio from mic');
+    });
+    this.mediaRecorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) {
+            // this.recordedAudioBlobs.push(event.data);
+            this.pushNewAudioBlob(event.data, event);
+        } else {
+            console.log("error in recording maybe");
+            console.log(event);
+        }
+    });
   }
 
+  pushNewAudioBlob = (blob, event) => {
+    this.recordedAudioBlobs.push(blob);
+  }
+
+  newMark = (timestamp) => {
+    this.lastMark = timestamp;
+    if (this.state.recording) {
+      this.recordedMarks.push(timestamp);
+    }
+  }
 
   toggleRecording = () => {
     if (this.state.recording) {
       this.mediaRecorder.stop();
-      while (this.mediaRecorder.state !== "inactive");
       this.setState({
         recording: false
       });
-      this.saveRecording();
+      // this.saveRecording();
     } else {
       this.recordedAudioBlobs = []
       this.recordedOutput = []
+      this.recordedAudioStartTimestamp = Date.now();
       this.mediaRecorder.start(this.blobLengthMS);
       this.setState({
         recording: true
@@ -72,7 +112,11 @@ class App extends Component {
   }
 
   saveRecording = () => {
-    let lr = new Blob(this.recordedAudioBlobs);
+    this.recordedAudioEndTimestamp = Date.now();
+    let lr = new Blob(this.recordedAudioBlobs, {
+      type: this.mimeType
+    });
+    console.log(lr);
     this.setState({
       recordedAudio: lr
     }, () => {
@@ -81,17 +125,16 @@ class App extends Component {
   }
 
   processRecording = () => {
-    let recordedAudio = this.state.recordedAudio;
+    var recordedAudio = this.state.recordedAudio;
 
     // used to read in audio as pure bytes
-    this.fr.onloadend = () => {
+    this.fr.addEventListener('load', (e) => {
+      console.log(e);
       console.log(this.fr.result);
       // need default audioctx for decodeAudioData method
       let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       audioCtx.decodeAudioData(this.fr.result, (audioBuffer) => {
         console.log(audioBuffer);
-        window.alert(audioBuffer.length);
-        return;
         // if (audioBuffer.length === 0) {
         //   this.saveRecording();
         //   return;
@@ -142,18 +185,24 @@ class App extends Component {
         // start processing the audio
         source.start();
         offlineAudioCtx.oncomplete = (renderedBuffer) => {
-          console.log(this.counter);
-          console.log(this.recordedOutput);
-          console.log(this.fftOutput);
-          console.log(this.recordedAudioBlobs);
-          console.log(this.state.recordedAudio);
+          // console.log(this.counter);
+          // console.log(this.recordedOutput);
+          // console.log(this.fftOutput);
+          // console.log(this.recordedAudioBlobs);
+          // console.log(this.state.recordedAudio);
+
+          console.log(this.recordedAccelerometerValues);
+          console.log(this.recordedPositionValues);
+          console.log(this.recordedAudioStartTimestamp);
+          console.log(this.recordedAudioEndTimestamp);
           this.createCsv();
         }
         offlineAudioCtx.startRendering();
       }, (e) => {
-        window.alert(e.message);
+        console.log('error decoding audio');
+        console.log(e);
       });
-    }
+    });
     // calls the above callback once it's done reading in
     this.fr.readAsArrayBuffer(recordedAudio);
   }
@@ -200,7 +249,13 @@ class App extends Component {
 
         <div className="box">
           {/* <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} /> */}
-          <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} newMediaRecorder={this.newMediaRecorder} />
+          <Audio recordedAudio={this.state.recordedAudio} newMediaRecorder={this.newMediaRecorder} />
+          {/*<a className="button is-danger" onClick={this.toggleRecordingAudio} href='#'>Record Audio</a>*/}
+        </div>
+
+        <div className="box">
+          {/* <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} /> */}
+          <Marking newMark={this.newMark} />
           {/*<a className="button is-danger" onClick={this.toggleRecordingAudio} href='#'>Record Audio</a>*/}
         </div>
 

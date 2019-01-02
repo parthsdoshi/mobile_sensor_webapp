@@ -1,5 +1,10 @@
 import React, { Component } from 'react';
 
+if (window.MediaRecorder == null) {
+    // safari polyfill
+    window.MediaRecorder = require('audio-recorder-polyfill');
+}
+
 class Audio extends Component {
     constructor(props) {
         super(props);
@@ -50,17 +55,8 @@ class Audio extends Component {
             mimeType: this.options.mimeType
         });
 
-        this.props.newMediaRecorder(this.mediaRecorder);
+        this.props.newMediaRecorder(this.mediaRecorder, this.options.mimeType);
 
-        this.mediaRecorder.addEventListener('dataavailable', (event) => {
-            if (event.data.size > 0) {
-                // this.recordedAudioBlobs.push(event.data);
-                this.props.pushNewAudioBlob(event.data, event);
-            } else {
-                console.log("error in recording maybe");
-                console.log(event);
-            }
-        });
         // this.mediaRecorder.addEventListener('stop', this.save_recording);
     }
 
