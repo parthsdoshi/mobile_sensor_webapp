@@ -16,27 +16,53 @@ class App extends Component {
       recording: false,
       recordedAudio: null,
       recordedAudioURL: null,
-      error: false
+      error: false,
+      csv: null
     };
 
-    this.recordedAccelerometerValues = [];
-    this.recordedPositionValues = [];
+    this.accelerometerValues = {
+      acceleration: {
+        x: null,
+        y: null,
+        z: null
+      }
+    };
 
-    this.recordedAudioStartTimestamp = null;
-    this.recordedAudioEndTimestamp = null;
-    this.recordedAudioBlobs = [];
-    this.fr = new FileReader();
-    this.fr.addEventListener('error', (e) => {
-      console.log(e);
-    });
-    this.counter = 0;
-    this.fftOutput = [];
-    // this.recordedOutput = []
+    this.position = {
+      coords: {
+        latitude: null,
+        longitude: null
+      }
+    };
+
+    this.reset();
     this.blobLengthMS = null;
   }
 
   componentDidMount() {
 
+  }
+
+  reset = () => {
+    this.recordedAccelerometerValues = [];
+    this.recordedPositionValues = [];
+    this.recordedMarks = [];
+
+    this.recordedAudioBlobs = [];
+    this.recordedOutput = [];
+    this.fftOutput = [];
+    this.recordedAudioStartTimestamp = null;
+    this.recordedAudioEndTimestamp = null;
+    this.csv = null;
+    this.csvBlob = null;
+
+    this.fr = new FileReader();
+    this.fr.addEventListener('error', (e) => {
+      console.log(e);
+    });
+    this.counter = 0;
+
+    this.lastMark = null;
   }
 
   updateAccelerometerValues = (deviceMotionEvent) => {
@@ -76,6 +102,7 @@ class App extends Component {
             // this.recordedAudioBlobs.push(event.data);
             this.pushNewAudioBlob(event.data, event);
         } else {
+            this.pushNewAudioBlob(event.data, event);
             console.log("error in recording maybe");
             console.log(event);
         }
@@ -93,17 +120,46 @@ class App extends Component {
     }
   }
 
+  updateMarkError = (side, error) => {
+    if (side === "left") {
+      this.markLeftError = error;
+    } else if (side === "right") {
+      this.markRightError = error;
+    }
+  }
+
   toggleRecording = () => {
     if (this.state.recording) {
       this.mediaRecorder.stop();
       this.setState({
         recording: false
       });
+      // below is now called by the mediaRecorder onstop event which is set during this.newMediaRecorder();
       // this.saveRecording();
     } else {
-      this.recordedAudioBlobs = []
-      this.recordedOutput = []
-      this.recordedAudioStartTimestamp = Date.now();
+      this.reset();
+
+      this.setState({
+        recordedAudio: null,
+        recordedAudioURL: null,
+        csv: null
+      });
+
+      let timestamp = Date.now();
+      this.recordedAudioStartTimestamp = timestamp;
+
+      this.recordedAccelerometerValues.push([
+        timestamp,
+        this.accelerometerValues.acceleration.x,
+        this.accelerometerValues.acceleration.y,
+        this.accelerometerValues.acceleration.z
+      ]);
+      this.recordedPositionValues.push([
+        timestamp,
+        this.position.coords.longitude,
+        this.position.coords.latitude
+      ]);
+
       this.mediaRecorder.start(this.blobLengthMS);
       this.setState({
         recording: true
@@ -116,30 +172,21 @@ class App extends Component {
     let lr = new Blob(this.recordedAudioBlobs, {
       type: this.mimeType
     });
-    console.log(lr);
     this.setState({
       recordedAudio: lr
-    }, () => {
-      this.processRecording();
     });
+    this.processRecording(lr);
   }
 
-  processRecording = () => {
-    var recordedAudio = this.state.recordedAudio;
+  processRecording = (recordedAudio) => {
+    // var recordedAudio = this.state.recordedAudio;
 
     // used to read in audio as pure bytes
     this.fr.addEventListener('load', (e) => {
-      console.log(e);
-      console.log(this.fr.result);
       // need default audioctx for decodeAudioData method
       let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       audioCtx.decodeAudioData(this.fr.result, (audioBuffer) => {
-        console.log(audioBuffer);
-        // if (audioBuffer.length === 0) {
-        //   this.saveRecording();
-        //   return;
-        // }
-        // window.alert(audioBuffer.duration);
+        // console.log(audioBuffer);
 
         let offlineAudioCtx = null;
         if (window.OfflineAudioContext) {
@@ -161,7 +208,6 @@ class App extends Component {
         // should give us an fft output around every .003 seconds
         // (1 / (192000/512))
         let fftSize = 2048.;
-        // window.alert(audioBuffer.sampleRate);
         while ((1. / (audioBuffer.sampleRate / fftSize)) >= 0.003) {
           if (fftSize === 512.) {
             break;
@@ -169,7 +215,7 @@ class App extends Component {
           fftSize = fftSize / 2;
         }
         this.analyser.fftSize = fftSize;
-        console.log(this.analyser);
+        // console.log(this.analyser);
 
         // needs to be created after analyser is initialized
         let processor = offlineAudioCtx.createScriptProcessor(this.analyser.fftSize, audioBuffer.numberOfChannels, audioBuffer.numberOfChannels);
@@ -184,20 +230,24 @@ class App extends Component {
 
         // start processing the audio
         source.start();
-        offlineAudioCtx.oncomplete = (renderedBuffer) => {
-          // console.log(this.counter);
-          // console.log(this.recordedOutput);
-          // console.log(this.fftOutput);
-          // console.log(this.recordedAudioBlobs);
-          // console.log(this.state.recordedAudio);
 
-          console.log(this.recordedAccelerometerValues);
-          console.log(this.recordedPositionValues);
-          console.log(this.recordedAudioStartTimestamp);
-          console.log(this.recordedAudioEndTimestamp);
-          this.createCsv();
+        offlineAudioCtx.oncomplete = (renderedBuffer) => {
+          // console.log(this.recordedAccelerometerValues);
+          // console.log(this.recordedPositionValues);
+          // console.log(this.recordedAudioStartTimestamp);
+          // console.log(this.recordedAudioEndTimestamp);
+          // console.log(this.fftOutput);
+          this.formatData(
+            this.recordedAccelerometerValues,
+            this.recordedPositionValues,
+            this.fftOutput,
+            this.recordedMarks,
+            this.recordedAudioStartTimestamp,
+            this.recordedAudioEndTimestamp
+          );
         }
         offlineAudioCtx.startRendering();
+
       }, (e) => {
         console.log('error decoding audio');
         console.log(e);
@@ -221,15 +271,109 @@ class App extends Component {
     this.fftOutput.push(dataArray);
   }
 
-  createCsv = () => {
+  formatData = (accelerometerValues, positionValues, audioFFTValues, markedValues, startTimestamp, endTimestamp) => {
+    let numberOfMS = endTimestamp - startTimestamp;
+
+    let fftRatio = parseFloat(numberOfMS) / parseFloat(audioFFTValues.length);
+
+    let formattedData = [];
+
+    let accelIndex = 0;
+    let positionIndex = 0;
+    let audioFFTIndex = 0;
+    let audioFFTUntil = fftRatio;
+
+    this.labels = [
+        'timestamp_ms',
+        'acceleration_x',
+        'acceleration_y',
+        'acceleration_z',
+        'latitude',
+        'longitude'
+      ];
+    for (let i = 0; i < audioFFTValues[0].length; i++) {
+      this.labels.push('FFT_bin_' + (i + 1));
+    }
+    this.labels.push('marked');
+
+    for (let i = 0; i < numberOfMS; i++) {
+      let currentTimestamp = startTimestamp + i;
+
+      let accelerometerValue = accelerometerValues[accelIndex];
+      let positionValue = positionValues[positionIndex];
+      let audioFFTValue = audioFFTValues[audioFFTIndex];
+
+      formattedData.push([
+        currentTimestamp,
+        ...accelerometerValue.slice(1),
+        ...positionValue.slice(1),
+        ...audioFFTValue,
+        0
+      ]);
+
+      let nextTimestamp = currentTimestamp + 1;
+
+      // for the following to work we should fast forward index in case...
+
+      if (accelIndex < accelerometerValues.length - 1) {
+        if (accelerometerValue[accelIndex + 1][0] <= nextTimestamp) {
+          accelIndex++;
+        }
+      }
+
+      if (positionIndex < positionValues.length - 1) {
+        if (positionValue[positionIndex + 1][0] <= nextTimestamp) {
+          positionIndex++;
+        }
+      }
+
+      if (i >= parseInt(audioFFTUntil)) {
+        audioFFTUntil += fftRatio;
+        audioFFTIndex++;
+      }
+    }
+
+    for (let markTimestamp of markedValues) {
+      let mark = markTimestamp - startTimestamp;
+
+      let leftMark = mark - this.markLeftError;
+      if (leftMark < 0) {
+        leftMark = 0;
+      }
+
+      let rightMark = mark + this.markRightError;
+      if (rightMark >= formattedData.length) {
+        rightMark = formattedData.length - 1;
+      }
+
+      for (let i = leftMark; i <= rightMark; i++) {
+        formattedData[i][this.labels.length - 1] = 1;
+      }
+    }
+
+    this.formattedData = formattedData;
+
+    this.createCSV(this.formattedData, this.labels);
+  }
+
+  createCSV = (formattedData, labels) => {
     // let csvContent = "data:text/csv;charset=utf-8,";
-    // this.recordedOutput.forEach((o) => {
-    //   let rowArr = [];
-    //   csvContent += rowArr.join(',') + '\r\n';
-    // });
-    // this.setState({
-    //   csv: window.encodeURI(csvContent)
-    // });
+    let csvContent = "";
+
+    csvContent += labels.join(',') + '\r\n';
+
+    formattedData.forEach((arr) => {
+      csvContent += arr.join(',') + '\r\n';
+    });
+
+    this.csv = csvContent;
+    this.csvBlob = new Blob([this.csv], {
+      type: 'text/csv'
+    });
+
+    this.setState({
+      csv: window.URL.createObjectURL(this.csvBlob)
+    });
   }
 
   render() {
@@ -248,23 +392,19 @@ class App extends Component {
         </div>
 
         <div className="box">
-          {/* <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} /> */}
           <Audio recordedAudio={this.state.recordedAudio} newMediaRecorder={this.newMediaRecorder} />
           {/*<a className="button is-danger" onClick={this.toggleRecordingAudio} href='#'>Record Audio</a>*/}
         </div>
 
         <div className="box">
-          {/* <Audio pushNewAudioBlob={this.pushNewAudioBlob} blobLengthMS={this.blobLengthMS} recordedAudio={this.state.recordedAudio} /> */}
-          <Marking newMark={this.newMark} />
+          <Marking newMark={this.newMark} updateError={this.updateMarkError} errorDisabled={this.state.recording} />
           {/*<a className="button is-danger" onClick={this.toggleRecordingAudio} href='#'>Record Audio</a>*/}
         </div>
 
         <div className="box">
           <h3 className="title is-3">Record All Sensors</h3>
           <button className="button is-danger" onClick={this.toggleRecording}>{(!this.state.recording && 'Start') || (this.state.recording && 'Stop')} Recording</button>
-          {/*this.mediaRecorder && this.mediaRecorder.mimeType*/}
-          {/*this.state.recordedAudioURL*/}
-          {this.state.recordedAudio != null && <div>
+          {this.state.csv != null && <div>
             <a className="button is-info" href={this.state.csv} download="results.csv">Download csv of all sensor data</a>
           </div>}
         </div>
